@@ -582,38 +582,46 @@ class FitnessTracker {
     disconnectGoogleSheets() {
         this.showLoading();
         
-        if (!this.googleApiLoaded) {
-            this.hideLoading();
-            this.showToast('Error', 'Google API not initialized', 'error');
-            return;
-        }
-        
-        // Sign out from Google
-        if (gapi.auth2 && gapi.auth2.getAuthInstance()) {
-            gapi.auth2.getAuthInstance().signOut().then(() => {
-                this.data.settings.googleSheetsConnected = false;
-                this.data.settings.sheetUrl = '';
-                this.saveData();
-                
-                this.updateGoogleSheetsStatus();
-                this.hideLoading();
-                this.showToast('Disconnected', 'Successfully disconnected from Google Sheets', 'success');
-            }).catch(error => {
-                console.error('Sign out error:', error);
-                this.hideLoading();
-                this.showToast('Error', 'Failed to disconnect from Google Sheets', 'error');
-            });
-        } else {
-            // If for some reason auth instance is not available,
-            // just disconnect locally
+        // Even if the API isn't loaded, we can still disconnect locally
+        // This ensures the user can always disconnect from their side
+        const disconnectLocally = () => {
             this.data.settings.googleSheetsConnected = false;
             this.data.settings.sheetUrl = '';
+            this.data.settings.spreadsheetId = '';
             this.saveData();
             
             this.updateGoogleSheetsStatus();
             this.hideLoading();
             this.showToast('Disconnected', 'Successfully disconnected from Google Sheets', 'success');
+            console.log('Disconnected from Google Sheets locally');
+        };
+        
+        // Try to disconnect from Google's side if API is loaded
+        if (typeof gapi !== 'undefined' && gapi.auth2) {
+            try {
+                const authInstance = gapi.auth2.getAuthInstance();
+                if (authInstance) {
+                    console.log('Signing out from Google Auth');
+                    authInstance.signOut()
+                        .then(() => {
+                            disconnectLocally();
+                        })
+                        .catch(error => {
+                            console.error('Sign out error:', error);
+                            // Even if sign out fails, we can still disconnect locally
+                            disconnectLocally();
+                        });
+                    return;
+                }
+            } catch (e) {
+                console.error('Error accessing Google Auth instance:', e);
+                // Continue to local disconnect
+            }
         }
+        
+        // If we reach here, the API wasn't properly loaded or auth instance wasn't available
+        // Just disconnect locally
+        disconnectLocally();
     }
 
     syncWithGoogleSheets() {
@@ -724,16 +732,36 @@ class FitnessTracker {
     }
 
     loadGoogleApi() {
-        // Skip if already loaded or loading
+        // If API is already fully loaded and ready
+        if (this.googleApiLoaded && typeof gapi !== 'undefined' && gapi.client && gapi.client.sheets) {
+            console.log('Google API is already loaded and ready');
+            return;
+        }
+        
+        // Check if script is already added but not fully initialized
         if (document.getElementById('google-api-script')) {
-            if (typeof gapi !== 'undefined' && gapi.client) {
-                this.googleApiLoaded = true;
+            console.log('Google API script exists but may not be fully initialized');
+            
+            // If GAPI exists but not fully initialized, handle it
+            if (typeof gapi !== 'undefined') {
+                console.log('GAPI object exists, attempting to complete initialization');
+                this.initGoogleApi();
                 return;
             }
             
-            // Script is there but API not loaded yet
-            console.log('Google API script exists but API not initialized yet');
-            return;
+            // If we're still loading, don't start another load
+            if (this.googleApiLoading) {
+                console.log('Still waiting for Google API to load');
+                return;
+            }
+            
+            // If we reached here, the script tag exists but failed to load properly
+            // Remove it and try again
+            const oldScript = document.getElementById('google-api-script');
+            if (oldScript && oldScript.parentNode) {
+                console.log('Removing failed Google API script tag');
+                oldScript.parentNode.removeChild(oldScript);
+            }
         }
         
         console.log('Loading Google API script');
@@ -760,6 +788,14 @@ class FitnessTracker {
     initGoogleApi() {
         console.log('Initializing Google API client');
         
+        // Safety check - make sure gapi is loaded
+        if (typeof gapi === 'undefined') {
+            console.error('GAPI not available yet');
+            this.googleApiLoading = false;
+            setTimeout(() => this.loadGoogleApi(), 2000); // Try again in 2 seconds
+            return;
+        }
+        
         // Check for configuration
         if (!this.GOOGLE_SHEETS_CONFIG.apiKey || 
             !this.GOOGLE_SHEETS_CONFIG.clientId || 
@@ -770,44 +806,55 @@ class FitnessTracker {
             return;
         }
         
-        gapi.load('client:auth2', () => {
-            console.log('GAPI client and auth2 modules loaded');
-            
-            gapi.client.init({
-                apiKey: this.GOOGLE_SHEETS_CONFIG.apiKey,
-                clientId: this.GOOGLE_SHEETS_CONFIG.clientId,
-                discoveryDocs: [this.GOOGLE_SHEETS_CONFIG.discoveryDoc],
-                scope: this.GOOGLE_SHEETS_CONFIG.scopes
-            }).then(() => {
-                this.googleApiLoaded = true;
-                console.log('Google API initialized successfully');
+        try {
+            gapi.load('client:auth2', () => {
+                console.log('GAPI client and auth2 modules loaded');
                 
-                // Load the sheets API
-                return gapi.client.load('sheets', 'v4');
-            }).then(() => {
-                console.log('Sheets API loaded');
-                
-                // Check if user is already signed in
-                if (gapi.auth2.getAuthInstance().isSignedIn.get()) {
-                    console.log('User is already signed in');
-                    this.data.settings.googleSheetsConnected = true;
-                    this.data.settings.spreadsheetId = this.GOOGLE_SHEETS_CONFIG.spreadsheetId;
-                    this.data.settings.sheetUrl = `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
-                    this.updateGoogleSheetsStatus();
-                } else {
-                    console.log('User is not signed in');
-                }
-                
-                // Process any pending sync requests
-                if (this.syncQueue.length > 0) {
-                    this.processQueuedSyncs();
-                }
-            }).catch(error => {
-                this.googleApiLoading = false;
-                console.error('Error initializing Google API:', error);
-                this.showToast('Error', 'Failed to initialize Google API. Check your API keys and network connection.', 'error');
+                gapi.client.init({
+                    apiKey: this.GOOGLE_SHEETS_CONFIG.apiKey,
+                    clientId: this.GOOGLE_SHEETS_CONFIG.clientId,
+                    discoveryDocs: [this.GOOGLE_SHEETS_CONFIG.discoveryDoc],
+                    scope: this.GOOGLE_SHEETS_CONFIG.scopes
+                }).then(() => {
+                    this.googleApiLoaded = true;
+                    this.googleApiLoading = false;
+                    console.log('Google API initialized successfully');
+                    
+                    // Load the sheets API
+                    return gapi.client.load('sheets', 'v4');
+                }).then(() => {
+                    console.log('Sheets API loaded');
+                    
+                    // Check if user is already signed in
+                    try {
+                        if (gapi.auth2.getAuthInstance().isSignedIn.get()) {
+                            console.log('User is already signed in');
+                            this.data.settings.googleSheetsConnected = true;
+                            this.data.settings.spreadsheetId = this.GOOGLE_SHEETS_CONFIG.spreadsheetId;
+                            this.data.settings.sheetUrl = `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
+                            this.updateGoogleSheetsStatus();
+                        } else {
+                            console.log('User is not signed in');
+                        }
+                    } catch (err) {
+                        console.error('Error checking sign-in status:', err);
+                    }
+                    
+                    // Process any pending sync requests
+                    if (this.syncQueue.length > 0) {
+                        this.processQueuedSyncs();
+                    }
+                }).catch(error => {
+                    this.googleApiLoading = false;
+                    console.error('Error initializing Google API:', error);
+                    this.showToast('Error', 'Failed to initialize Google API. Check your API keys and network connection.', 'error');
+                });
             });
-        });
+        } catch (error) {
+            this.googleApiLoading = false;
+            console.error('Exception during GAPI initialization:', error);
+            this.showToast('Error', 'Failed to initialize Google API client', 'error');
+        }
     }
     
     // Process queued sync operations
@@ -904,15 +951,33 @@ class FitnessTracker {
         const btn = document.querySelector('.connect-sheets-btn');
         const info = document.querySelector('.sheets-info');
         
+        // Ensure UI elements exist before trying to update them
+        if (!indicator || !text || !btn || !info) {
+            console.error('Google Sheets status UI elements not found');
+            return;
+        }
+        
         if (this.data.settings.googleSheetsConnected) {
+            // Update connection status UI
             indicator.className = 'status-indicator';
             text.textContent = 'Connected';
             btn.textContent = 'Disconnect';
             info.style.display = 'block';
-            document.getElementById('sheetUrl').textContent = this.data.settings.sheetUrl;
-            document.getElementById('lastSync').textContent = this.data.settings.lastSync ? 
-                this.formatDateTime(this.data.settings.lastSync) : 'Never';
+            
+            // Update sheet URL and last sync time
+            const sheetUrlElement = document.getElementById('sheetUrl');
+            if (sheetUrlElement) {
+                sheetUrlElement.textContent = this.data.settings.sheetUrl || 
+                    `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
+            }
+            
+            const lastSyncElement = document.getElementById('lastSync');
+            if (lastSyncElement) {
+                lastSyncElement.textContent = this.data.settings.lastSync ? 
+                    this.formatDateTime(this.data.settings.lastSync) : 'Never';
+            }
         } else {
+            // Update for disconnected state
             indicator.className = 'status-indicator offline';
             text.textContent = 'Not Connected';
             btn.textContent = 'Connect Google Sheets';
