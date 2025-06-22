@@ -18,6 +18,7 @@ class FitnessTracker {
         };
         
         this.googleApiLoaded = false;
+        this.googleApiLoading = false;
         this.syncQueue = [];
         
         this.init();
@@ -67,7 +68,11 @@ class FitnessTracker {
 
         // Settings
         document.querySelector('.connect-sheets-btn').addEventListener('click', () => {
-            this.connectGoogleSheets();
+            if (this.data.settings.googleSheetsConnected) {
+                this.disconnectGoogleSheets();
+            } else {
+                this.connectGoogleSheets();
+            }
         });
 
         document.getElementById('themeSelect').addEventListener('change', (e) => {
@@ -535,6 +540,16 @@ class FitnessTracker {
     connectGoogleSheets() {
         this.showLoading();
         
+        // Check if API configuration is missing
+        if (!this.GOOGLE_SHEETS_CONFIG.apiKey || 
+            !this.GOOGLE_SHEETS_CONFIG.clientId || 
+            !this.GOOGLE_SHEETS_CONFIG.spreadsheetId) {
+            this.hideLoading();
+            this.showToast('Configuration Error', 'Google Sheets API configuration is missing. Please check config.js file.', 'error');
+            console.error('Missing Google Sheets configuration. Check config.js file.');
+            return;
+        }
+        
         if (!this.googleApiLoaded) {
             this.loadGoogleApi();
             this.hideLoading();
@@ -544,19 +559,61 @@ class FitnessTracker {
         
         // Authorize with Google
         gapi.auth2.getAuthInstance().signIn().then(response => {
-            this.data.settings.googleSheetsConnected = true;
-            this.data.settings.sheetUrl = `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
-            this.data.settings.lastSync = new Date().toISOString();
+            // Verify we can access the sheet by attempting to read from it
+            return this.readFromSheet().then(() => {
+                // Sheet access successful
+                this.data.settings.googleSheetsConnected = true;
+                this.data.settings.spreadsheetId = this.GOOGLE_SHEETS_CONFIG.spreadsheetId;
+                this.data.settings.sheetUrl = `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
+                this.data.settings.lastSync = new Date().toISOString();
+                this.saveData();
+                
+                this.updateGoogleSheetsStatus();
+                this.hideLoading();
+                this.showToast('Connected!', 'Successfully connected to Google Sheets', 'success');
+            });
+        }).catch(error => {
+            console.error('Auth or sheet access error:', error);
+            this.hideLoading();
+            this.showToast('Error', 'Failed to connect to Google Sheets. Please check your credentials and permissions.', 'error');
+        });
+    }
+
+    disconnectGoogleSheets() {
+        this.showLoading();
+        
+        if (!this.googleApiLoaded) {
+            this.hideLoading();
+            this.showToast('Error', 'Google API not initialized', 'error');
+            return;
+        }
+        
+        // Sign out from Google
+        if (gapi.auth2 && gapi.auth2.getAuthInstance()) {
+            gapi.auth2.getAuthInstance().signOut().then(() => {
+                this.data.settings.googleSheetsConnected = false;
+                this.data.settings.sheetUrl = '';
+                this.saveData();
+                
+                this.updateGoogleSheetsStatus();
+                this.hideLoading();
+                this.showToast('Disconnected', 'Successfully disconnected from Google Sheets', 'success');
+            }).catch(error => {
+                console.error('Sign out error:', error);
+                this.hideLoading();
+                this.showToast('Error', 'Failed to disconnect from Google Sheets', 'error');
+            });
+        } else {
+            // If for some reason auth instance is not available,
+            // just disconnect locally
+            this.data.settings.googleSheetsConnected = false;
+            this.data.settings.sheetUrl = '';
             this.saveData();
             
             this.updateGoogleSheetsStatus();
             this.hideLoading();
-            this.showToast('Connected!', 'Successfully connected to Google Sheets', 'success');
-        }).catch(error => {
-            console.error('Auth error:', error);
-            this.hideLoading();
-            this.showToast('Error', 'Failed to connect to Google Sheets', 'error');
-        });
+            this.showToast('Disconnected', 'Successfully disconnected from Google Sheets', 'success');
+        }
     }
 
     syncWithGoogleSheets() {
@@ -606,8 +663,18 @@ class FitnessTracker {
     // Read data from Google Sheet
     async readFromSheet() {
         try {
+            // Use config spreadsheet ID if settings one is not available
+            const spreadsheetId = this.data.settings.spreadsheetId || this.GOOGLE_SHEETS_CONFIG.spreadsheetId;
+            
+            if (!spreadsheetId) {
+                console.error('No spreadsheet ID available for reading');
+                throw new Error('No spreadsheet ID configured');
+            }
+            
+            console.log(`Reading from sheet: ${spreadsheetId}`);
+            
             const response = await gapi.client.sheets.spreadsheets.values.get({
-                spreadsheetId: this.GOOGLE_SHEETS_CONFIG.spreadsheetId,
+                spreadsheetId: spreadsheetId,
                 range: this.GOOGLE_SHEETS_CONFIG.range
             });
             return response.result.values || [];
@@ -657,23 +724,55 @@ class FitnessTracker {
     }
 
     loadGoogleApi() {
-        // Skip if already loaded
+        // Skip if already loaded or loading
         if (document.getElementById('google-api-script')) {
+            if (typeof gapi !== 'undefined' && gapi.client) {
+                this.googleApiLoaded = true;
+                return;
+            }
+            
+            // Script is there but API not loaded yet
+            console.log('Google API script exists but API not initialized yet');
             return;
         }
+        
+        console.log('Loading Google API script');
+        this.googleApiLoading = true;
         
         const script = document.createElement('script');
         script.id = 'google-api-script';
         script.src = 'https://apis.google.com/js/api.js';
         script.async = true;
         script.defer = true;
-        script.onload = () => this.initGoogleApi();
+        script.onload = () => {
+            console.log('Google API script loaded successfully');
+            this.initGoogleApi();
+        };
+        script.onerror = (error) => {
+            console.error('Failed to load Google API script:', error);
+            this.googleApiLoading = false;
+            this.showToast('Error', 'Failed to load Google API. Check your internet connection.', 'error');
+        };
         document.head.appendChild(script);
     }
     
     // Initialize Google API client
     initGoogleApi() {
+        console.log('Initializing Google API client');
+        
+        // Check for configuration
+        if (!this.GOOGLE_SHEETS_CONFIG.apiKey || 
+            !this.GOOGLE_SHEETS_CONFIG.clientId || 
+            !this.GOOGLE_SHEETS_CONFIG.spreadsheetId) {
+            console.error('Missing Google Sheets configuration:', this.GOOGLE_SHEETS_CONFIG);
+            this.googleApiLoading = false;
+            this.showToast('Configuration Error', 'Google Sheets API configuration is incomplete. Check config.js file.', 'error');
+            return;
+        }
+        
         gapi.load('client:auth2', () => {
+            console.log('GAPI client and auth2 modules loaded');
+            
             gapi.client.init({
                 apiKey: this.GOOGLE_SHEETS_CONFIG.apiKey,
                 clientId: this.GOOGLE_SHEETS_CONFIG.clientId,
@@ -681,12 +780,22 @@ class FitnessTracker {
                 scope: this.GOOGLE_SHEETS_CONFIG.scopes
             }).then(() => {
                 this.googleApiLoaded = true;
-                console.log('Google API initialized');
+                console.log('Google API initialized successfully');
+                
+                // Load the sheets API
+                return gapi.client.load('sheets', 'v4');
+            }).then(() => {
+                console.log('Sheets API loaded');
                 
                 // Check if user is already signed in
                 if (gapi.auth2.getAuthInstance().isSignedIn.get()) {
+                    console.log('User is already signed in');
                     this.data.settings.googleSheetsConnected = true;
+                    this.data.settings.spreadsheetId = this.GOOGLE_SHEETS_CONFIG.spreadsheetId;
+                    this.data.settings.sheetUrl = `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
                     this.updateGoogleSheetsStatus();
+                } else {
+                    console.log('User is not signed in');
                 }
                 
                 // Process any pending sync requests
@@ -694,7 +803,9 @@ class FitnessTracker {
                     this.processQueuedSyncs();
                 }
             }).catch(error => {
+                this.googleApiLoading = false;
                 console.error('Error initializing Google API:', error);
+                this.showToast('Error', 'Failed to initialize Google API. Check your API keys and network connection.', 'error');
             });
         });
     }
@@ -717,6 +828,17 @@ class FitnessTracker {
             return;
         }
         
+        // Use config spreadsheet ID if settings one is not available
+        const spreadsheetId = this.data.settings.spreadsheetId || this.GOOGLE_SHEETS_CONFIG.spreadsheetId;
+        
+        if (!spreadsheetId) {
+            console.error('No spreadsheet ID available for writing');
+            this.showToast('Error', 'No spreadsheet ID configured', 'error');
+            return;
+        }
+        
+        console.log(`Writing to sheet: ${spreadsheetId}`);
+        
         const values = entries.map(entry => [
             entry.date,
             entry.weight,
@@ -733,9 +855,9 @@ class FitnessTracker {
         };
         
         gapi.client.sheets.spreadsheets.values.append({
-            spreadsheetId: this.data.settings.spreadsheetId,
+            spreadsheetId: spreadsheetId,
             range: this.GOOGLE_SHEETS_CONFIG.range,
-            valueInputOption: 'RAW',
+            valueInputOption: 'USER_ENTERED',
             resource: body
         }).then((response) => {
             const result = response.result;
