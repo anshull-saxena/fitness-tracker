@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fitness Progress Tracker</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#21808D">
+    <meta name="description" content="Track your fitness progress with beautiful charts and seamless Google Sheets integration">
+    
+    <!-- PWA Meta Tags -->
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="default">
+    <meta name="apple-mobile-web-app-title" content="Fitness Tracker">
+    
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+<body>
+    <!-- App Container -->
+    <div class="app-container">
+        <!-- Navigation -->
+        <nav class="nav-bar">
+            <div class="nav-content">
+                <button class="nav-item active" data-page="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span class="nav-label">Dashboard</span>
+                </button>
+                <button class="nav-item" data-page="entry">
+                    <span class="nav-icon">➕</span>
+                    <span class="nav-label">Add Entry</span>
+                </button>
+                <button class="nav-item" data-page="progress">
+                    <span class="nav-icon">📈</span>
+                    <span class="nav-label">Progress</span>
+                </button>
+                <button class="nav-item" data-page="history">
+                    <span class="nav-icon">📋</span>
+                    <span class="nav-label">History</span>
+                </button>
+                <button class="nav-item" data-page="settings">
+                    <span class="nav-icon">⚙️</span>
+                    <span class="nav-label">Settings</span>
+                </button>
+            </div>
+        </nav>
+
+        <!-- Status Bar -->
+        <div class="status-bar">
+            <div class="status-content">
+                <div class="connection-status">
+                    <span class="status-indicator" id="connectionStatus"></span>
+                    <span id="connectionText">Online</span>
+                </div>
+                <div class="sync-status" id="syncStatus">
+                    <span class="sync-indicator"></span>
+                    <span id="syncText">Synced</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Dashboard Page -->
+            <div class="page active" id="dashboard">
+                <div class="page-header">
+                    <h1>Dashboard</h1>
+                    <p class="page-subtitle">Your fitness progress overview</p>
+                </div>
+                
+                <div class="dashboard-grid">
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <h3>Current Weight</h3>
+                            <span class="stat-icon">⚖️</span>
+                        </div>
+                        <div class="stat-value" id="currentWeight">--</div>
+                        <div class="stat-change" id="weightChange">No data</div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <h3>Waist Size</h3>
+                            <span class="stat-icon">📏</span>
+                        </div>
+                        <div class="stat-value" id="currentWaist">--</div>
+                        <div class="stat-change" id="waistChange">No data</div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <h3>Current Phase</h3>
+                            <span class="stat-icon">🎯</span>
+                        </div>
+                        <div class="stat-value" id="currentPhase">--</div>
+                        <div class="stat-change" id="phaseDuration">--</div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-header">
+                            <h3>Entries This Week</h3>
+                            <span class="stat-icon">📅</span>
+                        </div>
+                        <div class="stat-value" id="weeklyEntries">0</div>
+                        <div class="stat-change">of 7 days</div>
+                    </div>
+                </div>
+
+                <div class="quick-actions">
+                    <h2>Quick Actions</h2>
+                    <div class="action-buttons">
+                        <button class="btn btn--primary btn--lg quick-entry-btn">
+                            <span>Add Today's Entry</span>
+                        </button>
+                        <button class="btn btn--secondary sync-btn">
+                            <span>Sync with Google Sheets</span>
+                        </button>
+                    </div>
+                </div>
+
+                <div class="recent-entries">
+                    <h2>Recent Entries</h2>
+                    <div class="entries-list" id="recentEntriesList">
+                        <!-- Recent entries will be populated here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Data Entry Page -->
+            <div class="page" id="entry">
+                <div class="page-header">
+                    <h1>Add Entry</h1>
+                    <p class="page-subtitle">Record your daily fitness metrics</p>
+                </div>
+                
+                <form class="entry-form" id="entryForm">
+                    <div class="form-group">
+                        <label class="form-label" for="entryDate">Date</label>
+                        <input type="date" id="entryDate" class="form-control" required>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="weight">Weight (kg)</label>
+                            <input type="number" id="weight" class="form-control" step="0.1" placeholder="75.5">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="waist">Waist (inches)</label>
+                            <input type="number" id="waist" class="form-control" step="0.1" placeholder="32.0">
+                        </div>
+                    </div>
+                    
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label class="form-label" for="calories">Calories</label>
+                            <input type="number" id="calories" class="form-control" placeholder="2000">
+                        </div>
+                        <div class="form-group">
+                            <label class="form-label" for="protein">Protein (g)</label>
+                            <input type="number" id="protein" class="form-control" placeholder="150">
+                        </div>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="mood">Mood/Energy</label>
+                        <select id="mood" class="form-control">
+                            <option value="">Select mood...</option>
+                            <option value="Excellent">Excellent</option>
+                            <option value="Good">Good</option>
+                            <option value="Average">Average</option>
+                            <option value="Poor">Poor</option>
+                            <option value="Terrible">Terrible</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="phase">Phase</label>
+                        <select id="phase" class="form-control">
+                            <option value="">Select phase...</option>
+                            <option value="Cutting">Cutting</option>
+                            <option value="Bulking">Bulking</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group">
+                        <label class="form-label" for="trainingNotes">Training Notes</label>
+                        <textarea id="trainingNotes" class="form-control" rows="4" placeholder="Describe your workout, how you felt, any notes..."></textarea>
+                    </div>
+                    
+                    <div class="form-actions">
+                        <button type="submit" class="btn btn--primary btn--full-width btn--lg">
+                            Save Entry
+                        </button>
+                        <button type="button" class="btn btn--secondary btn--full-width clear-form-btn">
+                            Clear Form
+                        </button>
+                    </div>
+                </form>
+            </div>
+
+            <!-- Progress Page -->
+            <div class="page" id="progress">
+                <div class="page-header">
+                    <h1>Progress</h1>
+                    <p class="page-subtitle">Track your fitness journey with charts</p>
+                </div>
+                
+                <div class="chart-container">
+                    <div class="chart-card">
+                        <h3>Weight Progress</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="weightChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <h3>Waist Measurements</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="waistChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <h3>Calories vs Protein</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="nutritionChart"></canvas>
+                        </div>
+                    </div>
+                    
+                    <div class="chart-card">
+                        <h3>Phase Progress</h3>
+                        <div class="chart-wrapper">
+                            <canvas id="phaseChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- History Page -->
+            <div class="page" id="history">
+                <div class="page-header">
+                    <h1>History</h1>
+                    <p class="page-subtitle">View and edit your previous entries</p>
+                </div>
+                
+                <div class="history-controls">
+                    <div class="search-container">
+                        <input type="search" id="historySearch" class="form-control" placeholder="Search entries...">
+                    </div>
+                    <div class="filter-container">
+                        <select id="phaseFilter" class="form-control">
+                            <option value="">All Phases</option>
+                            <option value="Cutting">Cutting</option>
+                            <option value="Bulking">Bulking</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <div class="history-list" id="historyList">
+                    <!-- History entries will be populated here -->
+                </div>
+            </div>
+
+            <!-- Settings Page -->
+            <div class="page" id="settings">
+                <div class="page-header">
+                    <h1>Settings</h1>
+                    <p class="page-subtitle">Configure your app preferences</p>
+                </div>
+                
+                <div class="settings-sections">
+                    <div class="settings-section">
+                        <h3>Google Sheets Integration</h3>
+                        <div class="card">
+                            <div class="card__body">
+                                <div class="google-sheets-status">
+                                    <div class="connection-info">
+                                        <span class="status-indicator" id="sheetsStatus"></span>
+                                        <span id="sheetsStatusText">Not Connected</span>
+                                    </div>
+                                    <button class="btn btn--primary connect-sheets-btn">
+                                        Connect Google Sheets
+                                    </button>
+                                </div>
+                                <div class="sheets-info" style="display: none;">
+                                    <p><strong>Sheet URL:</strong> <span id="sheetUrl">--</span></p>
+                                    <p><strong>Last Sync:</strong> <span id="lastSync">--</span></p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h3>App Preferences</h3>
+                        <div class="card">
+                            <div class="card__body">
+                                <div class="form-group">
+                                    <label class="form-label">Theme</label>
+                                    <select id="themeSelect" class="form-control">
+                                        <option value="auto">Auto (System)</option>
+                                        <option value="light">Light</option>
+                                        <option value="dark">Dark</option>
+                                    </select>
+                                </div>
+                                <div class="form-group">
+                                    <label class="form-label">Auto-sync</label>
+                                    <div class="toggle-container">
+                                        <input type="checkbox" id="autoSync" class="toggle-input">
+                                        <label for="autoSync" class="toggle-label">Enable automatic sync with Google Sheets</label>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="settings-section">
+                        <h3>Data Management</h3>
+                        <div class="card">
+                            <div class="card__body">
+                                <div class="data-actions">
+                                    <button class="btn btn--secondary export-data-btn">
+                                        Export Data (JSON)
+                                    </button>
+                                    <button class="btn btn--outline import-data-btn">
+                                        Import Data
+                                    </button>
+                                    <button class="btn btn--outline clear-data-btn">
+                                        Clear All Data
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <p>Processing...</p>
+    </div>
+
+    <!-- Toast Notifications -->
+    <div class="toast-container" id="toastContainer"></div>
+
+    <script src="app.js"></script>
+</body>
+</html>
