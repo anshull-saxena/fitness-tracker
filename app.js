@@ -539,7 +539,7 @@ class FitnessTracker {
 
     connectGoogleSheets() {
         this.showLoading();
-        
+
         // Check if API configuration is missing
         if (!this.GOOGLE_SHEETS_CONFIG.apiKey || 
             !this.GOOGLE_SHEETS_CONFIG.clientId || 
@@ -549,16 +549,18 @@ class FitnessTracker {
             console.error('Missing Google Sheets configuration. Check config.js file.');
             return;
         }
-        
+
         if (!this.googleApiLoaded) {
             this.loadGoogleApi();
             this.hideLoading();
             this.showToast('Loading', 'Initializing Google API, please try again in a moment', 'info');
             return;
         }
-        
+
         // Authorize with Google
         gapi.auth2.getAuthInstance().signIn().then(response => {
+            console.log('User signed in:', response);
+
             // Verify we can access the sheet by attempting to read from it
             return this.readFromSheet().then(() => {
                 // Sheet access successful
@@ -567,7 +569,7 @@ class FitnessTracker {
                 this.data.settings.sheetUrl = `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
                 this.data.settings.lastSync = new Date().toISOString();
                 this.saveData();
-                
+
                 this.updateGoogleSheetsStatus();
                 this.hideLoading();
                 this.showToast('Connected!', 'Successfully connected to Google Sheets', 'success');
