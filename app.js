@@ -581,7 +581,7 @@ class FitnessTracker {
 
     disconnectGoogleSheets() {
         this.showLoading();
-        
+
         // Even if the API isn't loaded, we can still disconnect locally
         // This ensures the user can always disconnect from their side
         const disconnectLocally = () => {
@@ -589,16 +589,16 @@ class FitnessTracker {
             this.data.settings.sheetUrl = '';
             this.data.settings.spreadsheetId = '';
             this.saveData();
-            
+
             this.updateGoogleSheetsStatus();
-            this.hideLoading();
+            this.hideLoading(); // Ensure loading overlay is hidden
             this.showToast('Disconnected', 'Successfully disconnected from Google Sheets', 'success');
             console.log('Disconnected from Google Sheets locally');
         };
-        
-        // Try to disconnect from Google's side if API is loaded
-        if (typeof gapi !== 'undefined' && gapi.auth2) {
-            try {
+
+        try {
+            // Try to disconnect from Google's side if API is loaded
+            if (typeof gapi !== 'undefined' && gapi.auth2) {
                 const authInstance = gapi.auth2.getAuthInstance();
                 if (authInstance) {
                     console.log('Signing out from Google Auth');
@@ -608,19 +608,16 @@ class FitnessTracker {
                         })
                         .catch(error => {
                             console.error('Sign out error:', error);
-                            // Even if sign out fails, we can still disconnect locally
-                            disconnectLocally();
+                            disconnectLocally(); // Ensure local disconnect even on error
                         });
                     return;
                 }
-            } catch (e) {
-                console.error('Error accessing Google Auth instance:', e);
-                // Continue to local disconnect
             }
+        } catch (e) {
+            console.error('Error accessing Google Auth instance:', e);
         }
-        
+
         // If we reach here, the API wasn't properly loaded or auth instance wasn't available
-        // Just disconnect locally
         disconnectLocally();
     }
 
