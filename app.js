@@ -7,6 +7,19 @@ class FitnessTracker {
         this.isOnline = navigator.onLine;
         this.syncPending = false;
         
+        // Google Sheets API configuration (loaded from config.js)
+        this.GOOGLE_SHEETS_CONFIG = window.GOOGLE_SHEETS_CONFIG || {
+            apiKey: '',
+            clientId: '',
+            spreadsheetId: '',
+            range: 'Sheet1!A:H',
+            discoveryDoc: 'https://sheets.googleapis.com/$discovery/rest?version=v4',
+            scopes: 'https://www.googleapis.com/auth/spreadsheets'
+        };
+        
+        this.googleApiLoaded = false;
+        this.syncQueue = [];
+        
         this.init();
     }
 
@@ -18,6 +31,7 @@ class FitnessTracker {
         this.initializeCharts();
         this.setTodaysDate();
         this.loadSettings();
+        this.loadGoogleApi();
         
         // Update connection status periodically
         setInterval(() => this.updateConnectionStatus(), 5000);
@@ -521,17 +535,28 @@ class FitnessTracker {
     connectGoogleSheets() {
         this.showLoading();
         
-        // Simulate API connection
-        setTimeout(() => {
+        if (!this.googleApiLoaded) {
+            this.loadGoogleApi();
+            this.hideLoading();
+            this.showToast('Loading', 'Initializing Google API, please try again in a moment', 'info');
+            return;
+        }
+        
+        // Authorize with Google
+        gapi.auth2.getAuthInstance().signIn().then(response => {
             this.data.settings.googleSheetsConnected = true;
-            this.data.settings.sheetUrl = 'https://docs.google.com/spreadsheets/d/your-sheet-id';
+            this.data.settings.sheetUrl = `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
             this.data.settings.lastSync = new Date().toISOString();
             this.saveData();
             
             this.updateGoogleSheetsStatus();
             this.hideLoading();
             this.showToast('Connected!', 'Successfully connected to Google Sheets', 'success');
-        }, 2000);
+        }).catch(error => {
+            console.error('Auth error:', error);
+            this.hideLoading();
+            this.showToast('Error', 'Failed to connect to Google Sheets', 'error');
+        });
     }
 
     syncWithGoogleSheets() {
@@ -542,14 +567,184 @@ class FitnessTracker {
 
         this.updateSyncStatus('syncing');
         
-        // Simulate sync process
-        setTimeout(() => {
+        // Check if API is loaded
+        if (!this.googleApiLoaded) {
+            this.loadGoogleApi();
+            this.syncPending = true;
+            return;
+        }
+        
+        // Check if signed in
+        if (!gapi.auth2.getAuthInstance().isSignedIn.get()) {
+            this.connectGoogleSheets();
+            return;
+        }
+        
+        // First read existing data to avoid duplicates
+        this.readFromSheet().then(existingData => {
+            // Filter entries not yet in sheet
+            const entriesToSync = this.formatEntriesToSync(existingData);
+            
+            if (entriesToSync.length > 0) {
+                return this.writeToSheet(entriesToSync);
+            } else {
+                return Promise.resolve();
+            }
+        }).then(() => {
             this.data.settings.lastSync = new Date().toISOString();
             this.syncPending = false;
             this.saveData();
             this.updateSyncStatus('synced');
             this.showToast('Synced!', 'Data synchronized with Google Sheets', 'success');
-        }, 2000);
+        }).catch(error => {
+            console.error('Sync error:', error);
+            this.updateSyncStatus('error');
+            this.showToast('Sync Failed', 'Could not synchronize with Google Sheets', 'error');
+        });
+    }
+    
+    // Read data from Google Sheet
+    async readFromSheet() {
+        try {
+            const response = await gapi.client.sheets.spreadsheets.values.get({
+                spreadsheetId: this.GOOGLE_SHEETS_CONFIG.spreadsheetId,
+                range: this.GOOGLE_SHEETS_CONFIG.range
+            });
+            return response.result.values || [];
+        } catch (error) {
+            console.error('Error reading from sheet:', error);
+            throw error;
+        }
+    }
+    
+    // Write data to Google Sheet
+    async writeToSheet(entries) {
+        if (!entries || entries.length === 0) return;
+        
+        try {
+            await gapi.client.sheets.spreadsheets.values.append({
+                spreadsheetId: this.GOOGLE_SHEETS_CONFIG.spreadsheetId,
+                range: this.GOOGLE_SHEETS_CONFIG.range,
+                valueInputOption: 'USER_ENTERED',
+                resource: { 
+                    values: entries 
+                }
+            });
+        } catch (error) {
+            console.error('Error writing to sheet:', error);
+            throw error;
+        }
+    }
+    
+    // Format entries for syncing to sheet
+    formatEntriesToSync(existingData) {
+        const existingDates = (existingData || [])
+            .slice(1) // Skip header row
+            .map(row => row[0]); // Get dates column
+        
+        return this.data.entries
+            .filter(entry => !existingDates.includes(entry.date))
+            .map(entry => [
+                entry.date,
+                entry.weight || '',
+                entry.waist || '',
+                entry.calories || '',
+                entry.protein || '',
+                entry.trainingNotes || '',
+                entry.mood || '',
+                entry.phase || ''
+            ]);
+    }
+
+    loadGoogleApi() {
+        // Skip if already loaded
+        if (document.getElementById('google-api-script')) {
+            return;
+        }
+        
+        const script = document.createElement('script');
+        script.id = 'google-api-script';
+        script.src = 'https://apis.google.com/js/api.js';
+        script.async = true;
+        script.defer = true;
+        script.onload = () => this.initGoogleApi();
+        document.head.appendChild(script);
+    }
+    
+    // Initialize Google API client
+    initGoogleApi() {
+        gapi.load('client:auth2', () => {
+            gapi.client.init({
+                apiKey: this.GOOGLE_SHEETS_CONFIG.apiKey,
+                clientId: this.GOOGLE_SHEETS_CONFIG.clientId,
+                discoveryDocs: [this.GOOGLE_SHEETS_CONFIG.discoveryDoc],
+                scope: this.GOOGLE_SHEETS_CONFIG.scopes
+            }).then(() => {
+                this.googleApiLoaded = true;
+                console.log('Google API initialized');
+                
+                // Check if user is already signed in
+                if (gapi.auth2.getAuthInstance().isSignedIn.get()) {
+                    this.data.settings.googleSheetsConnected = true;
+                    this.updateGoogleSheetsStatus();
+                }
+                
+                // Process any pending sync requests
+                if (this.syncQueue.length > 0) {
+                    this.processQueuedSyncs();
+                }
+            }).catch(error => {
+                console.error('Error initializing Google API:', error);
+            });
+        });
+    }
+    
+    // Process queued sync operations
+    processQueuedSyncs() {
+        if (!this.googleApiLoaded || this.syncQueue.length === 0) return;
+        
+        // Process each queued item
+        while (this.syncQueue.length > 0) {
+            const entry = this.syncQueue.shift();
+            this.writeToSheet([entry]);
+        }
+    }
+    
+    writeToSheet(entries) {
+        if (!this.googleApiLoaded) {
+            this.syncQueue.push(...entries);
+            this.showToast('Queued', 'Sync will resume when Google API is available', 'info');
+            return;
+        }
+        
+        const values = entries.map(entry => [
+            entry.date,
+            entry.weight,
+            entry.waist,
+            entry.calories,
+            entry.protein,
+            entry.mood,
+            entry.phase,
+            entry.trainingNotes
+        ]);
+        
+        const body = {
+            values: values
+        };
+        
+        gapi.client.sheets.spreadsheets.values.append({
+            spreadsheetId: this.data.settings.spreadsheetId,
+            range: this.GOOGLE_SHEETS_CONFIG.range,
+            valueInputOption: 'RAW',
+            resource: body
+        }).then((response) => {
+            const result = response.result;
+            console.log(`${result.updates.updatedCells} cells updated.`);
+            this.showToast('Synced', 'Data synced with Google Sheets', 'success');
+        }).catch((error) => {
+            console.error('Error syncing with Google Sheets:', error);
+            this.showToast('Sync Error', 'An error occurred while syncing with Google Sheets', 'error');
+        });
     }
 
     updateConnectionStatus() {
