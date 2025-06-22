@@ -784,73 +784,49 @@ class FitnessTracker {
     // Initialize Google API client
     initGoogleApi() {
         console.log('Initializing Google API client');
-        
+
         // Safety check - make sure gapi is loaded
         if (typeof gapi === 'undefined') {
             console.error('GAPI not available yet');
             this.googleApiLoading = false;
+            this.showToast('Error', 'Failed to initialize Google API. Retrying...', 'error');
             setTimeout(() => this.loadGoogleApi(), 2000); // Try again in 2 seconds
             return;
         }
-        
+
         // Check for configuration
         if (!this.GOOGLE_SHEETS_CONFIG.apiKey || 
             !this.GOOGLE_SHEETS_CONFIG.clientId || 
             !this.GOOGLE_SHEETS_CONFIG.spreadsheetId) {
             console.error('Missing Google Sheets configuration:', this.GOOGLE_SHEETS_CONFIG);
             this.googleApiLoading = false;
-            this.showToast('Configuration Error', 'Google Sheets API configuration is incomplete. Check config.js file.', 'error');
+            this.showToast('Error', 'Google Sheets API configuration is missing. Please check config.js file.', 'error');
             return;
         }
         
         try {
             gapi.load('client:auth2', () => {
-                console.log('GAPI client and auth2 modules loaded');
-                
+                console.log('Google API client and auth2 loaded');
                 gapi.client.init({
                     apiKey: this.GOOGLE_SHEETS_CONFIG.apiKey,
                     clientId: this.GOOGLE_SHEETS_CONFIG.clientId,
                     discoveryDocs: [this.GOOGLE_SHEETS_CONFIG.discoveryDoc],
                     scope: this.GOOGLE_SHEETS_CONFIG.scopes
                 }).then(() => {
+                    console.log('Google API client initialized successfully');
                     this.googleApiLoaded = true;
                     this.googleApiLoading = false;
-                    console.log('Google API initialized successfully');
-                    
-                    // Load the sheets API
-                    return gapi.client.load('sheets', 'v4');
-                }).then(() => {
-                    console.log('Sheets API loaded');
-                    
-                    // Check if user is already signed in
-                    try {
-                        if (gapi.auth2.getAuthInstance().isSignedIn.get()) {
-                            console.log('User is already signed in');
-                            this.data.settings.googleSheetsConnected = true;
-                            this.data.settings.spreadsheetId = this.GOOGLE_SHEETS_CONFIG.spreadsheetId;
-                            this.data.settings.sheetUrl = `https://docs.google.com/spreadsheets/d/${this.GOOGLE_SHEETS_CONFIG.spreadsheetId}`;
-                            this.updateGoogleSheetsStatus();
-                        } else {
-                            console.log('User is not signed in');
-                        }
-                    } catch (err) {
-                        console.error('Error checking sign-in status:', err);
-                    }
-                    
-                    // Process any pending sync requests
-                    if (this.syncQueue.length > 0) {
-                        this.processQueuedSyncs();
-                    }
+                    this.showToast('Success', 'Google API initialized successfully', 'success');
                 }).catch(error => {
+                    console.error('Error initializing Google API client:', error);
                     this.googleApiLoading = false;
-                    console.error('Error initializing Google API:', error);
                     this.showToast('Error', 'Failed to initialize Google API. Check your API keys and network connection.', 'error');
                 });
             });
         } catch (error) {
+            console.error('Unexpected error during Google API initialization:', error);
             this.googleApiLoading = false;
-            console.error('Exception during GAPI initialization:', error);
-            this.showToast('Error', 'Failed to initialize Google API client', 'error');
+            this.showToast('Error', 'Unexpected error during Google API initialization. Please try again.', 'error');
         }
     }
     
